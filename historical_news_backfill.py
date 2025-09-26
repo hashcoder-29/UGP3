@@ -7,6 +7,8 @@ import argparse
 import logging
 from transformers import pipeline
 import torch
+from db_utils import get_db_engine
+
 
 # ##############################################################################
 # ## PASTE YOUR NEWS_API_KEY HERE                                             ##
@@ -82,26 +84,29 @@ def analyze_sentiment(df):
     return df
 
 def run_backfill(start_date, end_date):
-    """ Main function to run the historical data backfill. """
-    master_archive_file = "all_historical_news.csv"
+    """ Main function to run the historical data backfill directly to the database. """
     
-    # Dummy list of Nifty 50 companies.
-    # NOTE: We use a static list here as fetching historical constituents is not feasible.
+    # ## --- CHANGED: Connect to the database instead of using a CSV file --- ##
+    engine = get_db_engine()
+    if engine is None:
+        logging.error("Could not create database engine. Exiting.")
+        return
+        
+    master_table_name = "historical_news"
+    
     nifty50_companies = [
         "Reliance Industries", "TCS", "HDFC Bank", "Infosys", "ICICI Bank", 
         "Hindustan Unilever", "State Bank of India", "Bajaj Finance", "Bharti Airtel", "ITC"
-        # Add more company names for better coverage
     ]
     
-    # Load existing archive to avoid duplicating entries
+    # ## --- CHANGED: Load existing URLs from the database --- ##
     try:
-        historical_df = pd.read_csv(master_archive_file)
-        seen_urls = set(historical_df['link'])
-        logging.info(f"Loaded {len(historical_df)} articles from existing archive.")
-    except FileNotFoundError:
-        historical_df = pd.DataFrame()
+        existing_links_df = pd.read_sql_query(f'SELECT link FROM {master_table_name}', engine)
+        seen_urls = set(existing_links_df['link'])
+        logging.info(f"Loaded {len(seen_urls)} existing article links from the database.")
+    except Exception as e:
+        logging.warning(f"Could not load existing links from database (table might not exist yet): {e}")
         seen_urls = set()
-        logging.info("No existing archive found. Creating a new one.")
 
     # Loop through each day in the date range
     current_date = start_date
@@ -109,13 +114,12 @@ def run_backfill(start_date, end_date):
         date_str = current_date.strftime('%Y-%m-%d')
         
         # 1. Fetch Raw News for the day
-        
         daily_articles = fetch_historical_newsapi(nifty50_companies, date_str)
         
         if not daily_articles:
             logging.info(f"No articles found for {date_str}. Moving to next day.")
             current_date += timedelta(days=1)
-            time.sleep(2) # Sleep even if no articles are found to respect rate limits
+            time.sleep(2)
             continue
         
         daily_df = pd.DataFrame(daily_articles)
@@ -124,25 +128,27 @@ def run_backfill(start_date, end_date):
         new_articles_df = daily_df[~daily_df['link'].isin(seen_urls)]
         
         if new_articles_df.empty:
-            logging.info(f"No new articles for {date_str}. All found articles are already in the archive.")
+            logging.info(f"No new articles for {date_str}. All found articles are already in the database.")
         else:
             # 2. Analyze Sentiment for new articles
             analyzed_df = analyze_sentiment(new_articles_df.copy())
             
-            # 3. Append to historical DataFrame and update seen_urls
-            historical_df = pd.concat([historical_df, analyzed_df], ignore_index=True)
-            for link in analyzed_df['link']:
-                seen_urls.add(link)
-            
-            # 4. Save progress to the master file
-            historical_df.to_csv(master_archive_file, index=False)
-            logging.info(f"SUCCESS: Fetched, analyzed, and saved {len(analyzed_df)} new articles for {date_str}.")
+            # ## --- CHANGED: Append results directly to the database table --- ##
+            try:
+                analyzed_df.to_sql(master_table_name, engine, if_exists='append', index=False)
+                # Update our in-memory set of seen URLs to avoid re-adding
+                for link in analyzed_df['link']:
+                    seen_urls.add(link)
+                logging.info(f"SUCCESS: Fetched, analyzed, and saved {len(analyzed_df)} new articles to the database for {date_str}.")
+            except Exception as e:
+                logging.error(f"Failed to save data to the database for {date_str}: {e}")
 
         # Move to the next day and sleep to respect API rate limits
         current_date += timedelta(days=1)
-        time.sleep(2) # IMPORTANT: Wait between days to avoid hitting API rate limits
+        time.sleep(2)
 
 if __name__ == "__main__":
+    # ... (The argparse and date parsing logic remains the same) ...
     parser = argparse.ArgumentParser(description="Fetch historical news for Nifty 50 companies.")
     parser.add_argument("start_date", type=str, help="Start date in YYYY-MM-DD format.")
     parser.add_argument("end_date", type=str, help="End date in YYYY-MM-DD format.")
