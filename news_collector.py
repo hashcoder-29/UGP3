@@ -7,14 +7,10 @@ from datetime import datetime, timedelta
 import time
 import random
 import logging
-import os # Import the os library
-# ... (other imports)
-
 # ##############################################################################
-# ## The script now gets secrets from environment variables provided by GitHub  ##
-# ## The strings here are just fallbacks for local testing.                   ##
+# ## PASTE YOUR FIVE FREE API KEYS HERE                                       ##
 # ##############################################################################
-NEWS_API_KEY = os.environ.get("NEWS_API_KEY", "YOUR_LOCAL_KEY_HERE")
+NEWS_API_KEY = "6532d685925c4cb0bc86026474157de2"         # From https://newsapi.org/
 # ##############################################################################
 
 import time
