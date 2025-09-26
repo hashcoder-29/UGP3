@@ -109,6 +109,7 @@ def run_backfill(start_date, end_date):
         date_str = current_date.strftime('%Y-%m-%d')
         
         # 1. Fetch Raw News for the day
+        
         daily_articles = fetch_historical_newsapi(nifty50_companies, date_str)
         
         if not daily_articles:
