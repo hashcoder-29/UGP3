@@ -1,0 +1,17 @@
+# environment.yml (Corrected Version)
+name: nifty_pipeline
+channels:
+  - conda-forge  # Highest priority for better compatibility
+  - pytorch
+  - defaults
+dependencies:
+  - python=3.11    # <-- Updated Python version
+  - pandas
+  - requests
+  - beautifulsoup4
+  - feedparser
+  - pytorch>=2.6
+  - pip
+  - pip:
+    - transformers
+    - sentencepiece

@@ -1,0 +1,2 @@
+date,total_call_oi,total_put_oi,put_call_ratio,total_call_oi_daily_change,total_put_oi_daily_change,total_articles,pct_positive,pct_negative,pct_neutral,overall_sentiment_score
+2025-09-26,4665878.333333333,3385878.0,0.7256678717511923,770095.0,732285.3333333335,115,0.26956521739130435,0.5304347826086957,0.2,-0.26086956521739135

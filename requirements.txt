@@ -1,0 +1,19 @@
+# requirements.txt
+
+# For data manipulation and file I/O
+pandas
+
+# For making HTTP requests to scrape data
+requests
+beautifulsoup4
+
+# For parsing RSS news feeds
+feedparser
+
+# Core library for deep learning models (PyTorch)
+torch
+
+# For using Hugging Face pre-trained models like FinBERT
+# sentencepiece is a required dependency for many tokenizer models
+transformers
+sentencepiece
