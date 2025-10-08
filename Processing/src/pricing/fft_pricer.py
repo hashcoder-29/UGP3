@@ -1,79 +1,89 @@
 """
-Carr–Madan (1999) FFT pricer for European calls using a provided characteristic function.
+Carr–Madan FFT call pricer (vectorized, with Simpson weights and log-strike shift).
 
-We price a damped call C_alpha(k) = e^{α k} C(k) with α>0. Its Fourier transform ψ(v) is:
- ψ(v) = e^{-rT} * φ_X( v - i(α+1) ) / (α^2 + α - v^2 + i(2α+1)v)
-
-Numerical details:
-- Simpson weights improve integration accuracy on the FFT grid.
-- Expose N (grid size), η (frequency spacing), α (damping).
-- Return strikes and prices aligned; users can interpolate to their desired K.
-
-References: Carr & Madan (1999)
+Returns central half of the strike grid for better numerical conditioning.
 """
 from __future__ import annotations
-import numpy as np
-from numpy.fft import fft
 from typing import Callable, Tuple
+from src.utils.backend import xp, fft, maybe_jit, asnumpy
+
+def _simpson_weights(N: int):
+    w = xp.ones(N)
+    # Simpson's rule weights on equally spaced grid: 1,4,2,4,...,4,1
+    w = w.at[0].set(1.0) if hasattr(w, "at") else (w.__setitem__(0, 1.0) or w)
+    w = w.at[-1].set(1.0) if hasattr(w, "at") else (w.__setitem__(-1, 1.0) or w)
+    if N > 2:
+        # set odd indices to 4, even indices (except endpoints) to 2
+        idx = xp.arange(1, N - 1)
+        vals = xp.where(idx % 2 == 1, 4.0, 2.0)
+        if hasattr(w, "at"):
+            w = w.at[1:-1].set(vals)
+        else:
+            w[1:-1] = asnumpy(vals)
+    w=w/3.0
+    return w
+
+@maybe_jit
+def _psi_transform(v, T: float, r: float, alpha: float, charfn: Callable):
+    """
+    Damped transform psi(v) used by Carr–Madan.
+    """
+    i = 1j
+    # Evaluate CF at shifted argument v - i(alpha+1)
+    denom = (alpha * alpha + alpha - v * v + i * (2.0 * alpha + 1.0) * v)
+    return xp.exp(-r * T) * charfn(v - i * (alpha + 1.0)) / denom
 
 def price_calls_fft(
     S0: float,
     T: float,
     r: float,
-    charfn: Callable[[np.ndarray], np.ndarray],
+    charfn: Callable,
     alpha: float = 1.5,
-    N: int = 2**12,
+    N: int = 2 ** 12,
     eta: float = 0.25,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> Tuple["xp.ndarray", "xp.ndarray"]:
     """
-    Compute call prices over a strike grid via FFT.
+    Price European calls on a log-strike grid using Carr–Madan FFT.
 
     Parameters
     ----------
     S0 : float
-        Spot.
     T : float
-        Time to maturity (years).
     r : float
-        Risk-free (cont. comp.).
     charfn : callable
-        Function u -> φ_X(u) for X_T = log(S_T/S0) under Q.
-    alpha : float, default 1.5
+        u -> phi_X(u), CF of log-returns under Q.
+    alpha : float
         Damping parameter (>0).
-    N : int, default 4096
+    N : int
         FFT grid size (power of 2 recommended).
-    eta : float, default 0.25
-        Frequency domain grid spacing.
+    eta : float
+        Frequency grid spacing.
 
     Returns
     -------
-    strikes : np.ndarray
-    prices  : np.ndarray
+    strikes : ndarray (numpy)
+    prices  : ndarray (numpy)
     """
-    assert alpha > 0.0, "alpha must be > 0"
-    v = np.arange(N) * eta  # frequency grid
-    # ψ(v) as per Carr–Madan
-    numerator = charfn(v - 1j * (alpha + 1.0))
-    denom = (alpha**2 + alpha - v**2) + 1j * (2.0 * alpha + 1.0) * v
-    psi = np.exp(-r * T) * numerator / denom
+    v = xp.arange(N, dtype=xp.float64) * eta         # frequency grid
+    dk = 2.0 * xp.pi / (N * eta)                     # log-strike spacing
+    b = xp.pi / eta                                  # grid half-width in k
+    k = -b + dk * xp.arange(N, dtype=xp.float64)     # log-strike grid
 
-    # Simpson weights
-    w = np.ones(N)
-    w[0] = w[-1] = 1.0 / 3.0
-    w[1:-1:2] = 4.0 / 3.0
-    w[2:-1:2] = 2.0 / 3.0
-    psi_weighted = psi * w
+    w = _simpson_weights(N)
+    psi = _psi_transform(v, T, r, alpha, charfn)
 
-    # FFT
-    fft_vals = fft(psi_weighted).real  # real part after symmetry
-    dk = 2.0 * np.pi / (N * eta)
-    k = - (N // 2) * dk + dk * np.arange(N)  # log-strike grid centered near 0
-    strikes = S0 * np.exp(k)
+    # Shift + scaling for FFT
+    g = psi * w * xp.exp(1j * v * b) * eta
 
-    # Undo damping and scale by π
-    calls = np.exp(-alpha * k) * fft_vals / np.pi
+    # FFT to get prices in log-strike space
+    F = fft.fft(g)
+    Ck = (S0 * xp.exp(-alpha * k) / xp.pi) * xp.real(F)
 
-    # For usability, return central half around ATM
-    start = N // 4
-    end = 3 * N // 4
-    return strikes[start:end], calls[start:end]
+    # Keep central half of the strikes for numerical quality
+    m0, m1 = N // 4, 3 * N // 4
+    strikes = S0 * xp.exp(k[m0:m1])
+    prices = Ck[m0:m1]
+
+    # Convert to numpy arrays for downstream consumers (tests use numpy)
+    import numpy as np
+    return np.asarray(asnumpy(strikes)), np.asarray(asnumpy(prices))

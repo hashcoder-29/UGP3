@@ -1,66 +1,51 @@
 """
-Kou (2002) double-exponential jump-diffusion characteristic function (risk-neutral).
+Kou (2002) double-exponential jump-diffusion characteristic function under Q.
 
-References:
-- Kou, S. G. (2002). "A Jump-Diffusion Model for Option Pricing". Management Science.
-- Carr, P., Madan, D. (1999). "Option valuation using the fast Fourier transform".
-
-We model X_T = log(S_T / S_0). Under Q:
-  φ_X(u) = E^Q[exp(i u X_T)] = exp{ ψ(u) * T }
-with
-  ψ(u) = i u (r - d - 0.5 σ^2 - λ κ) - 0.5 σ^2 u^2
-         + λ [ p η1 / (η1 - i u) + (1-p) η2 / (η2 + i u) - 1 ]
-where κ = E[V - 1] = E[e^Y] - 1,
-      Y ~ double-exponential: P(Y≥0)=p with density η1 e^{-η1 y} for y≥0,
-                              P(Y<0)=1-p with density η2 e^{η2 y} for y<0.
-Require η1>1 (finite upward mean), η2>0, 0<p<1, σ≥0, λ≥0.
+phi_X(u) = exp( T * psi(u) )
+psi(u) = i u (r - d - 0.5*sigma^2 - lambda * kappa) - 0.5*sigma^2 u^2
+         + lambda * ( p*eta1/(eta1 - i u) + (1-p)*eta2/(eta2 + i u) - 1 )
+kappa = E[e^Y] - 1 = p*eta1/(eta1 - 1) + (1-p)*eta2/(eta2 + 1) - 1
 """
 from __future__ import annotations
-import numpy as np
-from typing import Dict
+from typing import Dict, Any
+from src.utils.backend import xp, maybe_jit
 
-def charfn_kou(u: np.ndarray, T: float, params: Dict[str, float]) -> np.ndarray:
+@maybe_jit
+def charfn_kou(u, T: float, params: Dict[str, Any]):
     """
-    Vectorized Kou characteristic function φ_X(u) for X_T = log(S_T/S_0).
+    Risk-neutral CF of X_T = log(S_T / S_0) for Kou model.
 
     Parameters
     ----------
-    u : array_like
-        Fourier frequencies (float or complex), broadcastable.
-    T : float
-        Time to maturity in years.
-    params : dict
-        Expected keys: 'sigma','lambda','p','eta1','eta2','r','d' (d optional -> 0.0)
+    u : array-like (real/complex)
+    T : float  (years)
+    params : dict with keys {"sigma","lambda","p","eta1","eta2","r","d"}
 
     Returns
     -------
-    np.ndarray (complex)
-        φ_X(u) evaluated at input u.
+    phi : same shape as u (complex)
     """
-    sigma = float(params["sigma"])
-    lam = float(params["lambda"])
-    p = float(params["p"])
-    eta1 = float(params["eta1"])
-    eta2 = float(params["eta2"])
-    r = float(params.get("r", 0.0))
-    d = float(params.get("d", 0.0))
+    sigma = float(params.get("sigma", 0.2))
+    lam   = float(params.get("lambda", 0.0))
+    p     = float(params.get("p", 0.5))
+    eta1  = float(params.get("eta1", 20.0))
+    eta2  = float(params.get("eta2", 25.0))
+    r     = float(params.get("r", 0.0))
+    d     = float(params.get("d", 0.0))
 
-    # Safety/feasibility checks (soft; allow optimizer to explore but avoid NaNs)
-    if not (0.0 < p < 1.0) or eta1 <= 1.0 or eta2 <= 0.0 or sigma < 0.0 or lam < 0.0:
-        # Return zeros to penalize invalid regions in calibration (log-likelihood -> -inf)
-        u = np.asarray(u, dtype=complex)
-        return np.zeros_like(u, dtype=complex)
+    # Feasibility (scalar checks are fine in JAX)
+    if not (0.0 < p < 1.0) or (eta1 <= 1.0) or (eta2 <= 0.0) or (sigma < 0.0) or (lam < 0.0) or (T < 0.0):
+        return xp.zeros_like(u, dtype=xp.complex128)
 
-    u = np.asarray(u, dtype=complex)
-    iu = 1j * u
+    u = xp.asarray(u, dtype=xp.complex128)
+    i = 1j
 
-    # E[V] = E[e^Y] = p * η1/(η1-1) + (1-p) * η2/(η2+1)
-    E_V = p * (eta1 / (eta1 - 1.0)) + (1.0 - p) * (eta2 / (eta2 + 1.0))
-    kappa = E_V - 1.0
+    # Martingale correction for jumps
+    kappa = p * (eta1 / (eta1 - 1.0)) + (1.0 - p) * (eta2 / (eta2 + 1.0)) - 1.0
 
-    drift = iu * (r - d - 0.5 * sigma**2 - lam * kappa)
-    diffusion = -0.5 * (sigma**2) * (u**2)
-    jumps = lam * (p * eta1 / (eta1 - iu) + (1.0 - p) * eta2 / (eta2 + iu) - 1.0)
-    psi = drift + diffusion + jumps
+    # Characteristic exponent
+    psi = (i * u * (r - d - 0.5 * sigma * sigma - lam * kappa)
+           - 0.5 * sigma * sigma * (u ** 2)
+           + lam * (p * eta1 / (eta1 - i * u) + (1.0 - p) * eta2 / (eta2 + i * u) - 1.0))
 
-    return np.exp(psi * T)
+    return xp.exp(T * psi)
