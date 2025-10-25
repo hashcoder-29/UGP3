@@ -1,0 +1,2 @@
+date,news_count,sent_pos_share,sent_neg_share,sent_neu_share,sent_score_mean,sent_score_std,news_count_chg1,sent_score_mean_chg1,sent_pos_share_chg1,sent_neg_share_chg1
+2025-10-23,119,0.5462184873949579,0.2184873949579832,0.23529411764705882,0.8567230911815867,0.13132107205288587,,,,
