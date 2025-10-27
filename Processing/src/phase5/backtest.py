@@ -22,4 +22,12 @@ def backtest_signals(df: pd.DataFrame, cfg: BacktestConfig = BacktestConfig()) -
     out["strategy_ret"] = out["position"] * out["ret"] - tc
     out["cum_equity"] = (1.0 + out["strategy_ret"]).cumprod()
     out["cum_mkt"] = (1.0 + out["ret"]).cumprod()
+    out.index.name = "date"        # if you worked on a DateTimeIndex
+    have_date_col = ("date" in out.columns) or ("Date" in out.columns)
+    out = out.reset_index(drop=have_date_col)  # don't insert index as a column if date already exists
+    if "Date" in out.columns and "date" not in out.columns:
+        out = out.rename(columns={"Date": "date"})
+    if "date" in out.columns:
+        out["date"] = pd.to_datetime(out["date"], errors="coerce").dt.strftime("%Y-%m-%d")
     return out
+  
