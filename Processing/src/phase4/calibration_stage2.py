@@ -7,7 +7,8 @@ import numpy as np
 from dataclasses import dataclass
 from typing import Sequence, Callable, Tuple, Optional
 from .cox_kou_mc import DiffusionParams, KouJumpParams, IntensityDynamics, price_european_mc
-
+import pandas as pd
+from .sentiment_signal import build_lambda_curve_from_features
 @dataclass
 class MarketOption:
     K: float
@@ -15,6 +16,42 @@ class MarketOption:
     is_call: bool
     mid: float
     weight: float = 1.0
+# add inside calibration_stage2.py
+
+def grid_search_beta(features_csv: str, quotes_csv: str,
+                     kou_sigma: float, p_up: float, eta1: float, eta2: float,
+                     lam0_grid=(4.0, 6.0, 8.0, 10.0, 12.0),
+                     beta_grid=(0.2, 0.4, 0.6, 0.8),
+                     r: float = 0.06, S0: float | None = None,
+                     n_steps: int = 252, n_paths: int = 20000, seed: int | None = 42):
+    quotes = pd.read_csv(quotes_csv)
+    # Expect columns: K, is_call (0/1), mid, date, expiry (YYYY-MM-DD) or T (years)
+    if "T" not in quotes.columns:
+        T_days = np.busday_count(pd.to_datetime(quotes["date"]).values.astype("datetime64[D]"),
+                                 pd.to_datetime(quotes["expiry"]).values.astype("datetime64[D]"))
+        quotes["T"] = np.maximum(T_days, 1) / 252.0
+    if S0 is None:
+        # crude: use median strike or add underlying_close from features if present
+        S0 = float(quotes["K"].median())
+    feats = pd.read_csv(features_csv)
+    best=(None, None); best_rmse=float("inf")
+    for lam0 in lam0_grid:
+        for beta in beta_grid:
+            _, _, lambda_fn = build_lambda_curve_from_features(feats, lam0=lam0, beta=beta)
+            diff = DiffusionParams(mu=0.0, sigma=kou_sigma)
+            jump = KouJumpParams(lam=lam0, p_up=p_up, eta1=eta1, eta2=eta2)
+            inten = IntensityDynamics(kappa=2.0, a=lam0, b=beta, nu=0.2, lambda0=lam0)
+            model=[]
+            for _,row in quotes.iterrows():
+                price = price_european_mc(S0=float(S0), K=float(row["K"]), T=float(row["T"]), r=float(r),
+                                          diffusion=diff, jump=jump, intensity=inten,
+                                          n_steps=max(int(row["T"]*252),1), n_paths=n_paths,
+                                          sentiment_fn=lambda_fn, seed=seed)
+                model.append(price)
+            e = rmse(np.array(model), quotes["mid"].to_numpy())
+            if e < best_rmse:
+                best_rmse = e; best = (lam0, beta)
+    return {"best_lam0": best[0], "best_beta": best[1], "rmse": best_rmse}
 
 def rmse(prices_model: np.ndarray, prices_mkt: np.ndarray, weights: Optional[np.ndarray] = None) -> float:
     if weights is None:

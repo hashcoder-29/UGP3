@@ -150,9 +150,22 @@ def build_daily_features(data_dir: Path) -> pd.DataFrame:
     feats = feats.sort_values("date").reset_index(drop=True)
     for c in ["pcr_oi","pcr_volume","underlying_close","news_count","sent_score_mean"]:
         if c in feats.columns:
-            feats[c] = feats[c].fillna(method="ffill").fillna(method="bfill")
+            feats[c] = feats[c].ffill().bfill()
     for c in ["pcr_oi","pcr_volume","underlying_close","news_count","sent_score_mean","sent_pos_share","sent_neg_share"]:
         if c in feats.columns:
             feats[c+"_chg1"] = feats[c].diff()
     feats["date"] = pd.to_datetime(feats["date"])
+    # existing: feats[c] = feats[c].fillna(method="ffill").fillna(method="bfill")
+    # replace the three .fillna(method=...) calls + add a final 0-fill
+
+    # Forward/back fill numerics; final fallback to 0
+    num_cols = feats.select_dtypes(include=[np.number]).columns
+    feats[num_cols] = feats[num_cols].ffill().bfill().fillna(0.0)
+
+    # If your target column exists and can be NaN in the first row, drop it
+    target_cols = [c for c in feats.columns if c.startswith("y_") or c in ("target_up", "label")]
+    for c in target_cols:
+        if c in feats.columns:
+            feats = feats[~feats[c].isna()].copy()
+
     return feats

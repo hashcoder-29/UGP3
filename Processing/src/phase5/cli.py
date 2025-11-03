@@ -61,6 +61,15 @@ def cmd_backtest(args):
 
     # Align features to what the scaler/model expects; pass numpy to the pipeline
     X = df.reindex(columns=feature_cols, fill_value=0.0).values
+    # Ensure no NaNs in features
+    X = df[feature_cols].copy()
+    na_mask = X.isna().any(axis=1)
+    if na_mask.any():
+        dropped = int(na_mask.sum())
+        print(f"[backtest] Dropping {dropped} rows with NaNs in features before prediction.")
+        df = df.loc[~na_mask].copy()
+        X = X.loc[~na_mask].copy()
+
     df["prob_up"] = model.predict_proba(X)[:, 1]
 
     df = attach_signals(df, "prob_up", SignalConfig(prob_buy=args.buy, prob_sell=args.sell))

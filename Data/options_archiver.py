@@ -40,22 +40,22 @@ def archive_and_cleanup_to_db():
         return
 
     # --- Cleanup Step ---
-    logging.info("Starting cleanup of daily files...")
-    files_to_delete = [
-        f"nifty_options_{today_str}.csv",
-        f"nifty_options_{yesterday_str}.csv",
-        aggregated_file_today
-    ]
+    # logging.info("Starting cleanup of daily files...")
+    # files_to_delete = [
+    #     f"nifty_options_{today_str}.csv",
+    #     f"nifty_options_{yesterday_str}.csv",
+    #     aggregated_file_today
+    # ]
     
-    for file_path in files_to_delete:
-        try:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-                logging.info(f"  - Deleted: {file_path}")
-        except OSError as e:
-            logging.error(f"  - Error deleting file {file_path}: {e}")
+    # for file_path in files_to_delete:
+    #     try:
+    #         if os.path.exists(file_path):
+    #             os.remove(file_path)
+    #             logging.info(f"  - Deleted: {file_path}")
+    #     except OSError as e:
+    #         logging.error(f"  - Error deleting file {file_path}: {e}")
             
-    logging.info("✅ Cleanup successful.")
+    # logging.info("✅ Cleanup successful.")
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
